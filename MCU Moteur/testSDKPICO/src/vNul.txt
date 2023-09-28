@@ -1,0 +1,148 @@
+#include <pico/stdlib.h>
+#include <stdio.h>
+#include <pico/multicore.h>
+#include <hardware/gpio.h>
+#include <pico/time.h>
+#include <hardware/timer.h>
+#include <hardware/clocks.h>
+#include <hardware/pio.h>
+#include <hardware/structs/systick.h>
+#include <hardware/exception.h>
+
+#define FLAG_CORE1 1234
+
+//Mesure de temps
+volatile uint32_t period = 0;
+volatile uint32_t top = 0;
+
+volatile bool speedUpMode = 0;       //0 -> basse fréquence, 1 -> haute fréquence
+                              //Haute fréquence => période inférieur à environ 1ms (1kHz)
+                              //Basse fréquence => période suprérieur à environ 1ms (1kHz)
+
+#define MIN_INDEX 5     //Si l'index est trop petit on passe en SLOWED_MODE (correspond à 37Hz)
+#define BUFFER_SIZE 10
+
+float clkFrequence = 0;    //Fréquence de la clock en Hz
+float coeff = 0;  //Coeff pour passé du de 1us / 1/clkcpu à la fréquence
+volatile uint32_t MedianBuffer[BUFFER_SIZE] = {0};
+long moyenne = 0;
+volatile int index = 0;
+
+void core1();
+
+//Interruption signal A
+void InterruptSignalA(uint gpio, uint32_t events);
+
+void SysTickINT();
+
+int main()  {
+  stdio_init_all();
+
+  set_sys_clock_khz(125000, 0);   //clk_sys à 125MHz
+
+  systick_hw->csr |= 0x00000007;  //Active le compteur de cycle avec l'horloge et le interruption
+  systick_hw->rvr = 0x00ffffff;    //Valeur max
+
+  exception_set_exclusive_handler(SYSTICK_EXCEPTION, SysTickINT);
+
+  //LED
+  gpio_init(25);
+  gpio_set_dir(25, GPIO_OUT);
+  
+  //Initialise les interruptions sur la broche 21
+  gpio_set_irq_enabled_with_callback(21, GPIO_IRQ_EDGE_RISE, true, InterruptSignalA);
+  //Plus haute priorité
+  irq_set_priority(21, 0);
+
+  clkFrequence = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS) * 1000; //clk_cpu en hz;
+
+  //Setup core1 :
+  multicore_launch_core1(core1);
+  multicore_fifo_pop_blocking(); //Attend le lancement du core1
+
+  //Test :
+  gpio_put(25, 1);
+
+
+  //================== Core0 loop ====================
+  while(1)  {
+    
+    //   if (multicore_fifo_wready())  {
+    //     multicore_fifo_push_blocking(period);
+    //  }
+    moyenne = 0;
+
+    //Fréquence du compteur
+    if (speedUpMode)  coeff = clkFrequence;  //clk système en Hz
+    else              coeff = 1000000;       //us en hz
+    
+    for (int i = 0; i < BUFFER_SIZE; i++) {
+      moyenne += MedianBuffer[i];
+    }
+
+    moyenne /= BUFFER_SIZE;
+    printf("frequence: %ld\n", MedianBuffer[index]);
+
+    if (coeff / moyenne > 5000)  {
+      speedUpMode = 1;
+      systick_hw->csr |= 0x00000007; //Active int
+    }
+
+  }
+}
+
+void core1()  {
+  //Envoie un flag lorsqu'il est prêt
+  multicore_fifo_push_blocking(FLAG_CORE1);
+
+  float frequence = 0;
+
+  //================== Core1 loop ====================
+  while(1)  {
+    //Envoie la recoit au core0 :
+    // float moyenne = 0;
+    // for (int i = 0; i<1; i++)  {
+    //   if (multicore_fifo_rvalid())  {
+    //     moyenne += multicore_fifo_pop_blocking();
+    //   }
+    // }
+    //printf("moy: %f\n", moyenne / 1);
+    
+  }
+}
+
+void InterruptSignalA(uint gpio, uint32_t events) {
+  //Récupère la période du signal
+  index++;
+  if (speedUpMode)  {   //SPEED_UP_MODE
+    if (index)  {
+      if  (index >= BUFFER_SIZE)  index = 0; //Remise du compteur à 0
+
+      MedianBuffer[index] = 0x00ffffff - systick_hw->cvr;  //Enregistre la période
+    }
+    systick_hw->cvr &= 0x1100000; //Remise à 0
+  }
+
+  else  { //SLOWED_MODE
+    if (index >= BUFFER_SIZE)  {
+      index = 0; //Remise du compteur à 0
+    }
+    MedianBuffer[index] = time_us_32() - top;  //Enregistre la période
+  }
+
+  top = time_us_32();
+}
+
+void SysTickINT()   {
+  //speedUpMode == 1
+  if (index <= MIN_INDEX)  {   //systick limité à 24bit, soit dépassé en 134ms à 125MHz
+    systick_hw->csr &= 0xffffffd;      //Coupe les interruptions de systick
+    speedUpMode = 0;  //passe en mode basse fréquence
+  }
+  else  {
+    //Compteur systick dépassé
+    
+    index = -1;   //Remise du compteur à 0 au prochain front montant du signal
+    //Sans enregistré cette période (qui est fausse)
+  }
+}

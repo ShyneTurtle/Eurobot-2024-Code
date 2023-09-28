@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "../../../../../../../VSARM/sdk/pico/pico-examples"
+		},
+		{
+			"name": "testSDKPICO",
+			"path": "."
+		}
+	],
+	"settings": {}
+}

@@ -1,0 +1,10 @@
+
+; Code executed by pio. Act like a counter at 125MHz
+
+.program counter125
+
+; Main code
+.wrap_target
+    
+
+.wrap
