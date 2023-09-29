@@ -1,0 +1,29 @@
+{
+	"folders": [
+		{
+			"path": "./Coccinelle"
+		},
+		{
+			"path": "./MCU Mecha"
+		},
+		{
+			"path": "./MCU Moteur"
+		},
+		{
+			"path": "./MCU RFID"
+		},
+		{
+			"path": "./MCU UWB (Recepteur)"
+		},
+		{
+			"path": "./MCU UWB (Source)"
+		},
+		{
+			"path": "./Raspberry"
+		},
+		{
+			"path": "."
+		},
+	],
+	"settings": {}
+}
