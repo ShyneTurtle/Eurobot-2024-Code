@@ -1,4 +1,4 @@
-//Programme de test
+// Programme de test
 
 #include <pico/stdlib.h>
 #include <stdio.h>

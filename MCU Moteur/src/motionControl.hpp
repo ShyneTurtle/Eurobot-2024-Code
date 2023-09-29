@@ -3,10 +3,10 @@
 #include <pico/stdlib.h>
 #include <stdio.h>
 
-//Programme en dev. Censé construire une courbe de vitesse en fonction de la distance à parcourir
+// Programme en dev. Censé construire une courbe de vitesse en fonction de la distance à parcourir
 
 #define MAX_SPEED   0xffff
-#define DIST_BETWEEN_WHEELS 300     //En mm
+#define DIST_BETWEEN_WHEELS 300     // En mm
 #define FORWARD     1
 #define BACKWARD    0
 
@@ -17,101 +17,100 @@
 #define PLATEAU     1
 #define BREAK       2
 
-struct speedCurve    {
-    uint16_t minStartingSpeed = MAX_SPEED;
-    uint16_t maxSpeed = 0;
-    int64_t curvesLimit[3] = {0,0,0};
+struct SpeedCurve {
+    uint16_t min_starting_speed = MAX_SPEED;
+    uint16_t max_speed = 0;
+    int64_t curves_limit[3] = { 0,0,0 };
     bool dir = FORWARD;
 };
 
-class motionControl {
-private:
+class MotionControl {
+    private:
 
-    int64_t lastAbsFoots = 0;  //Nombre de pas absolus de puis la dernière construction de courbe
-    speedCurve sCurve;          //Courbe
+    int64_t last_abs_steps = 0;  // Nombre de pas absolus de puis la dernière construction de courbe
+    SpeedCurve s_curve;          // Courbe
 
-    int RiseCurve(uint64_t x)    {
-        return RISE_COEFF * x + sCurve.minStartingSpeed;
+    int riseCurve(uint64_t x) {
+        return RISE_COEFF * x + s_curve.min_starting_speed;
     }
 
-    int BreakCurve(uint64_t x)   {
-        return BREAK_COEFF * x + sCurve.maxSpeed;
+    int breakCurve(uint64_t x) {
+        return BREAK_COEFF * x + s_curve.max_speed;
     }
 
-    int RiseCurve_R(uint64_t y)  {
-        return y / RISE_COEFF + sCurve.minStartingSpeed / RISE_COEFF;
+    int riseCurveRecursive(uint64_t y) {
+        return y / RISE_COEFF + s_curve.min_starting_speed / RISE_COEFF;
     }
 
-    int BreakCurve_R(uint64_t y) {
-        return y / BREAK_COEFF + sCurve.maxSpeed / BREAK_COEFF;
+    int breakCurveRecursive(uint64_t y) {
+        return y / BREAK_COEFF + s_curve.max_speed / BREAK_COEFF;
     }
 
-    void BuildSpeedCurve(int64_t foots) {
-        lastAbsFoots = foots;
-        int riseTime = RiseCurve_R(sCurve.maxSpeed);    //Nombre de pas à atteindre avant la vitesse max
-        int breakTime = BreakCurve_R(0);       //Nombre de pas à atteindre avant l'arrêt
+    void buildSpeedCurve(int64_t steps) {
+        last_abs_steps = steps;
+        int rise_time = riseCurveRecursive(s_curve.max_speed);    // Nombre de pas à atteindre avant la vitesse max
+        int break_time = breakCurveRecursive(0);       // Nombre de pas à atteindre avant l'arrêt
 
-        if (foots < 0)  {   //On s'implifie le code en gardant le signe pour plus tard
-            foots *= -1;
-            sCurve.dir = BACKWARD;
+        if (steps < 0) {   // On s'implifie le code en gardant le signe pour plus tard
+            steps *= -1;
+            s_curve.dir = BACKWARD;
         }
 
-        if (foots > (riseTime + breakTime)) {
-            //Si il y a suffisamment de pas pour un plateau on en prends compte
-            sCurve.curvesLimit[RISE] = riseTime;
-            sCurve.curvesLimit[PLATEAU] = foots - (riseTime + breakTime);
-            sCurve.curvesLimit[BREAK] = breakTime;
-        }
-        else    {
-            //Sinon il n'y a pas de plateau et les temps de monté et de freinage sont raccourci
-            sCurve.curvesLimit[RISE] = foots / 2;
-            sCurve.curvesLimit[PLATEAU] = 0;
-            sCurve.curvesLimit[BREAK] = foots / 2;
+        if (steps > (rise_time + break_time)) {
+            // Si il y a suffisamment de pas pour un plateau on en prends compte
+            s_curve.curves_limit[RISE] = rise_time;
+            s_curve.curves_limit[PLATEAU] = steps - (rise_time + break_time);
+            s_curve.curves_limit[BREAK] = break_time;
+        } else {
+            // Sinon il n'y a pas de plateau et les temps de monté et de freinage sont raccourci
+            s_curve.curves_limit[RISE] = steps / 2;
+            s_curve.curves_limit[PLATEAU] = 0;
+            s_curve.curves_limit[BREAK] = steps / 2;
         }
     }
 
-public:
+    public:
 
-    int GetSpeedFromAdvancement(int64_t absFoots)    {
-        int64_t advFoots = absFoots - lastAbsFoots;   //Avancement
+    int getSpeedFromAdvancement(int64_t abs_steps) {
+        int64_t delta_steps = abs_steps - last_abs_steps;   // Avancement
         int64_t speed = 0;
 
-        if (advFoots < 0)   advFoots *= -1;
+        if (delta_steps < 0)   delta_steps *= -1;
 
-        //Avant la courbe de monté (bug)
-        if (advFoots < 0) {
-            speed = sCurve.minStartingSpeed;
+        // Avant la courbe de monté (bug)
+        if (delta_steps < 0) {
+            speed = s_curve.min_starting_speed;
         }
-        //Monté
-        else if (advFoots < sCurve.curvesLimit[RISE])  {
-            speed = RiseCurve(advFoots);
+        // Monté
+        else if (delta_steps < s_curve.curves_limit[RISE]) {
+            speed = riseCurve(delta_steps);
         }
-        //Plateau
-        else if (advFoots < sCurve.curvesLimit[RISE] + sCurve.curvesLimit[PLATEAU])  {
+        // Plateau
+        else if (delta_steps < s_curve.curves_limit[RISE] + s_curve.curves_limit[PLATEAU]) {
             speed = MAX_SPEED;
         }
-        //Freinage
-        else if (advFoots < sCurve.curvesLimit[RISE] + sCurve.curvesLimit[PLATEAU] + sCurve.curvesLimit[BREAK]) {
-            speed = BreakCurve(advFoots - (sCurve.curvesLimit[RISE] + sCurve.curvesLimit[PLATEAU]));
+        // Freinage
+        else if (delta_steps < s_curve.curves_limit[RISE] + s_curve.curves_limit[PLATEAU] + s_curve.curves_limit[BREAK]) {
+            speed = breakCurve(delta_steps - (s_curve.curves_limit[RISE] + s_curve.curves_limit[PLATEAU]));
         }
-        //Après la courbe de freinage (bug)
+        // Après la courbe de freinage (bug)
         else {
             speed = 0;
         }
 
-        if (sCurve.dir == BACKWARD)    speed *= -1;
+        if (s_curve.dir == BACKWARD)    speed *= -1;
 
         return speed;
     }
 
-    void Move(int64_t foots) {
-        BuildSpeedCurve(foots);
+    void move(int64_t steps) {
+        buildSpeedCurve(steps);
     }
 
-    void Rotate(bool proco, float degrees) {
+    void rotate(bool proco, float degrees) {
         //% du périmètre * périmètre de la rotation * conversion cm/pas
-        int64_t foots = (degrees / 360) * 3.1415 * DIST_BETWEEN_WHEELS * 1024; //1024 = nombres de pas par mm
-        if (proco)  foots *= -1;    //En fonction du moteur : direction inverse ou non
-        BuildSpeedCurve(foots);
+        int64_t steps = (degrees / 360) * 3.1415 * DIST_BETWEEN_WHEELS * 1024; // 1024 = nombres de pas par mm
+        if (proco)  steps *= -1;    // En fonction du moteur : direction inverse ou non
+        buildSpeedCurve(steps);
     }
 };
