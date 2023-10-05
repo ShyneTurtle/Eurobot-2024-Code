@@ -1,0 +1,91 @@
+//
+// !!! WARNING !!! AUTO-GENERATED FILE!
+// PLEASE DO NOT MODIFY IT AND USE "platformio.ini":
+// https://docs.platformio.org/page/projectconf/section_env_build.html#build-flags
+//
+{
+    "configurations": [
+        {
+            "name": "PlatformIO",
+            "includePath": [
+                "C:/Users/vince/OneDrive/Documents/GitHub/Eurobot-2024-Code/MCU Moteur/include",
+                "C:/Users/vince/OneDrive/Documents/GitHub/Eurobot-2024-Code/MCU Moteur/src",
+                "C:/Users/vince/OneDrive/Documents/GitHub/Eurobot-2024-Code/MCU Moteur/lib",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/wizio/pico",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/wizio/newlib",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/SDK/include",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/SDK/cmsis/include",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/SDK/boards",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/SDK/lib/tinyusb/src",
+                "C:/Users/vince/OneDrive/Documents/GitHub/Eurobot-2024-Code/MCU Moteur/.pio/libdeps/raspberry-pi-pico/Unity/src",
+                "C:/Users/vince/.platformio/lib/pico-sdk-master/src",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/VFS",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/cmsis-dap",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/fatfs",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/freertos/include",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/freertos/src",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/hal_tft",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/lfs",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/posix/include",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/posix/src",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/wiring/include",
+                "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/wiring/src",
+                ""
+            ],
+            "browse": {
+                "limitSymbolsToIncludedHeaders": true,
+                "path": [
+                    "C:/Users/vince/OneDrive/Documents/GitHub/Eurobot-2024-Code/MCU Moteur/include",
+                    "C:/Users/vince/OneDrive/Documents/GitHub/Eurobot-2024-Code/MCU Moteur/src",
+                    "C:/Users/vince/OneDrive/Documents/GitHub/Eurobot-2024-Code/MCU Moteur/lib",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/wizio/pico",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/wizio/newlib",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/SDK/include",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/SDK/cmsis/include",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/SDK/boards",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/SDK/lib/tinyusb/src",
+                    "C:/Users/vince/OneDrive/Documents/GitHub/Eurobot-2024-Code/MCU Moteur/.pio/libdeps/raspberry-pi-pico/Unity/src",
+                    "C:/Users/vince/.platformio/lib/pico-sdk-master/src",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/VFS",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/cmsis-dap",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/fatfs",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/freertos/include",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/freertos/src",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/hal_tft",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/lfs",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/posix/include",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/posix/src",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/wiring/include",
+                    "C:/Users/vince/.platformio/packages/framework-wizio-pico/library/wiring/src",
+                    ""
+                ]
+            },
+            "defines": [
+                "PLATFORMIO=60111",
+                "LIB_PICO_STDIO_USB",
+                "PICO_USB",
+                "NDEBUG",
+                "PICO_ON_DEVICE=1",
+                "PICO_HEAP_SIZE=2048",
+                "PICO_STACK_SIZE=2048",
+                "PICO_WIFI",
+                "BAREMETAL",
+                "PICO_STDIO_USB",
+                "CFG_TUSB_MCU=OPT_MCU_RP2040",
+                "CFG_TUSB_OS=OPT_OS_PICO",
+                ""
+            ],
+            "compilerPath": "C:/Users/vince/.platformio/packages/toolchain-gccarmnoneeabi@1.70201.0/bin/arm-none-eabi-gcc.exe",
+            "compilerArgs": [
+                "-march=armv6-m",
+                "-mcpu=cortex-m0plus",
+                "-mthumb",
+                "-march=armv6-m",
+                "-mcpu=cortex-m0plus",
+                "-mthumb",
+                ""
+            ]
+        }
+    ],
+    "version": 4
+}
