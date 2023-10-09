@@ -8,8 +8,6 @@
 #include <hardware/structs/systick.h>
 #include <hardware/exception.h>
 
-//Programme v1
-
 // === DESCRIPTION ===
 // Programme d'asservissement en vitesse de sur 1 seul moteur encodeur
 // (1V : 1 moteur, asservissement en Vitesse)

@@ -3,167 +3,241 @@
 #include <hardware/gpio.h>
 #include <pico/time.h>
 #include <pico/multicore.h>
+
 #include <hardware/timer.h>
 #include <hardware/clocks.h>
 #include <hardware/pwm.h>
 #include <hardware/structs/systick.h>
 #include <hardware/exception.h>
+#include <hardware/i2c.h>
 
-// Programme en distance
+
+// === DESCRIPTION ===
+// Programme d'asservissement pour 2 moteurs en courbe de vitesse
+// En cours de développement, non testé
+// (2C : 2 moteurs, asservissement en Courbe de vitesse)
+
+// === NOTES ===
+// PWM potentiellement inversé
+// Mises à jour sur les mesures de signaux et la génération du pwm
+// Implémentation de l'I2C (esclave)
 
 #define FLAG_CORE1  1234  // Flag de fin de setup du proco 1
 #define FORWARD     1     // Marche avant
 #define BACKWARD    0     // Marche arrière
 
 // Moteur 1
-#define PIN_SM1_A         0     // Signal A moteur 1
-#define PIN_SM1_B         2     // Signal B moteur 1
-#define PIN_PROCO_0_FREQ  10    // Pin indiquant la fréquence du proco 0
-#define PIN_PWM_M1        12    // PWM asservi pour le moteur 1(enable)
-#define PIN_DIR_M1        14    // Direction moteur 1
+#define PIN_M1_SA         3     // Pin du signal A, moteur 1
+#define PIN_M1_SB         2     // Pin du signal B, moteur 1
+#define PIN_PROCO_0_FREQ  10    // Pin indiquant la fréquence/2 du proco 0
+#define PIN_M1_PWM        12    // Pin de commande PWM, moteur 1
+#define PIN_M1_DIR        13    // Pin de direction moteur, moteur 1
 
 // Moteur 2
-#define PIN_SM2_A         1      // Signal A moteur 2
-#define PIN_SM2_B         3      // Signal B moteur 2
-#define PIN_PROCO_1_FREQ  11     // Pin indiquant la fréquence du proco 1
-#define PIN_PWM_M2        13     // PWM asservi pour le moteur 2
-#define PIN_DIR_M2        15     // Direction moteur 2
+#define PIN_M2_SA         1     // Pin du signal A moteur 2
+#define PIN_M2_SB         0     // Pin du signal B moteur 2
+#define PIN_PROCO_1_FREQ  11    // Pin indiquant la fréquence/2 du proco 1
+#define PIN_M2_PWM        14    // Pin de commande PWM, moteur 2
+#define PIN_M2_DIR        9     // Pin de direction moteur, moteur 2
+
+// I2C
+#define PIN_SDA           16
+#define PIN_SCL           17
+#define I2C_BAUD_RATE     100000  //100kHz
+#define I2C_SLAVE_ADDRESS 0x17
 
 // Interprétation des mesures
+#define BUFFER_SIZE     50       // Taille du filtre median mobile appliqué sur les mesures
+#define TIME_OUT        6667     // Si aucun signal n'est reçu après 6.7 ms, on considère le moteur à l'arrêt (µs)
 #define CLOCK_FREQ_KHZ  100000   // Fréquence du rp2040 (kHz)
-#define PWM_WRAP_VALUE  0xffff   // précision du pwm (0 -> 0xffff)
+#define PWM_WRAP_VALUE  255     // Précision du pwm (1 -> 0xffff), influe aussi sur la fréquence du pwm
+
+// Mesures de temps sur un encodeur et filtre median mobile
+struct SignalProcessing  {
+  volatile uint64_t top     = 0;      // Temps au dernier front montant du Signal de l'encodeur
+  volatile bool     signalB = false;  // Niveau logique du signal B lors du déclenchement de l'interruption (indique le sens de rotation)
+  volatile int64_t  absStep = 0;      // Nombre de pas depuis le lancement 
+
+  volatile uint32_t buffer[BUFFER_SIZE];  // Tableau des dernières valeurs mesurées
+  volatile int index  = 0;                // Indice sur la prochaine valeur remplacée sur le buffer
+  int32_t lastResult  = 0;                // Dernier résultat du filtre (vitesse la plus probable) 0 => 65535
+  bool updateMedian   = 0;                // Si =1, le calcul du filtre devrait être réalisé
+};
 
 // Structure pour un asservissement PID
 struct PidController {
-  float p = 1;
-  float i = 0.01;
-  float d = 0;
-  int  error = 0;           // Différence entre la step_target et la mesure
-  int  delta_error = 0;      // Différence entre l'erreur précédente et l'erreur
-  long sum_error = 0;        // Somme des erreurs
-  int  previous_error = 0;   // Erreur précédente
+  float kp = 4;
+  float ki = 0.2;
+  float kd = 0;
+  int32_t error = 0;            // Différence entre la consigne et la mesure
+  int32_t deltaError = 0;       // Différence entre l'erreur précédente et l'erreur
+  int32_t sumError = 0;         // Somme des erreurs
+  int32_t previous_error = 0;   // Erreur précédente
 };
 
 // Commande et asservissement moteur
-struct Motor {
-  volatile int64_t step_target = 0;         // Nombre de pas restant
-  PidController pid;            // Asservissement PID du moteur
-  uint16_t speed = 0;
-  bool dir = FORWARD;
-  volatile int64_t abs_foot = 0; // Nombre de pas par rapport à la position de départ
+struct Motor  {
+  int consigne = 0;             // Représente la vitesse voulu du moteur
+  PidController pid;            // Structure vers des données d'asservissement
+  int speed = 0;                // Valeur PWM calculé pour le moteur
+  bool direction = FORWARD;     // Sens de rotation moteur
 };
 
-Motor motor1;
-Motor motor2;
+struct  {
+  int32_t datas[256];
+  uint8_t  mem_address = 0;
+  bool master_writing = false;
+} i2c_memory;
+
+// Timer : 
+volatile uint64_t counter64_0 = 0;     // Retenues pour une conversion 24 bits vers 64 bits, proco 0
+volatile uint64_t counter64_1 = 0;     // Retenues pour une conversion 24 bits vers 64 bits, proco 1
+
+SignalProcessing signalM1;
+SignalProcessing signalM2;
 
 // === FONCTIONS ===
 
 void core1(); // Programme exécuté sur le proco 1
 
-void interruptSignal1(uint gpio, uint32_t events);  // Routine d'interruption sur le signal A moteur 1
+void interruptSignal1(uint gpio, uint32_t events);  // Routine d'interruption du signal A, moteur 1
 
-void interruptSignal2(uint gpio, uint32_t events);  // Routine d'interruption sur le signal A moteur 2
+void interruptSignal2(uint gpio, uint32_t events);  // Routine d'interruption du signal A, moteur 2
 
-void routine(Motor& motor_control, bool proco);  // Routine de loop identique aux deux proco
+void routine(SignalProcessing& signal, Motor& motorControl, bool proco);  // Routine de loop identique aux deux proco
 
-void pid(PidController& pid, bool& dir, uint16_t& speed);  // Correction PID
+int32_t PID(PidController& pid);  // Calcul de correction PID
 
-long constrain(long x, long min, long max);
+uint32_t mean(volatile uint32_t* tab);   // Calcul du filtre
+
+inline uint64_t getTime64(bool proco);   // Conversion du temps sur 64 bits (temps lié à la fréquence des procos)
+
+int32_t constrain(uint32_t x, uint32_t min, uint32_t max);
+
+uint16_t map(float x, float in_min, float in_max, float out_min, float out_max);
 
 // === MAIN PROCO 0 ===
-int main() {
-  // = INITIALISATION MATERIELLE =
+int main()  {
+
+  // === INITIALISATION MATERIELLE ===
   stdio_init_all();
-  set_sys_clock_khz(CLOCK_FREQ_KHZ, 0);   // clk_sys à 100MHz
+  set_sys_clock_khz(CLOCK_FREQ_KHZ, 0);   // Définition de le vitesse d'horloge du proco
+
+  // Initialisation du timer système
+  systick_hw->csr |= 0x00000005;    // Active le compteur de cycle avec l'horloge
+  systick_hw->rvr  = 0x00ffffff;    // Set la valeur max du compteur
 
   // Signal B
-  gpio_init(PIN_SM1_B);
-  gpio_set_dir(PIN_SM1_B, GPIO_IN);
+  gpio_init(PIN_M1_SB);
+  gpio_set_dir(PIN_M1_SB, GPIO_IN);
 
   // Signal Dir
-  gpio_init(PIN_DIR_M1);
-  gpio_set_dir(PIN_DIR_M1, GPIO_OUT);
+  gpio_init(PIN_M1_DIR);
+  gpio_set_dir(PIN_M1_DIR, GPIO_OUT);
 
   // Fréquence d'exécution du code
   gpio_init(PIN_PROCO_0_FREQ);
   gpio_set_dir(PIN_PROCO_0_FREQ, GPIO_OUT);
 
   // PWM
-  gpio_set_function(PIN_PWM_M1, GPIO_FUNC_PWM);
-  uint pwm = pwm_gpio_to_slice_num(PIN_PWM_M1);
+  gpio_set_function(PIN_M1_PWM, GPIO_FUNC_PWM);
+  uint pwm = pwm_gpio_to_slice_num(PIN_M1_PWM);
   pwm_set_wrap(pwm, PWM_WRAP_VALUE); // Set max
   pwm_set_chan_level(pwm, PWM_CHAN_A, 0); // 0%
   pwm_set_clkdiv(pwm, 100);
   pwm_set_enabled(pwm, 1);
 
-  // Initialise les interruptions sur la broche 0
-  gpio_set_irq_enabled_with_callback(PIN_SM1_A, GPIO_IRQ_EDGE_RISE, true, interruptSignal1);
+  // I2C init
+  i2c_inst_t* i2c = i2c_default;
+  i2c_init(i2c_default, 400000);
+  gpio_set_function(PIN_SDA, GPIO_FUNC_I2C);
+  gpio_set_function(PIN_SCL, GPIO_FUNC_I2C);
+  gpio_pull_up(PIN_SCL);
+  gpio_pull_up(PIN_SDA);
+  
+  // Initialise les interruptions sur la broche du signal A
+  gpio_set_irq_enabled_with_callback(PIN_M1_SA, GPIO_IRQ_EDGE_RISE, true, interruptSignal1);
   irq_set_priority(IO_IRQ_BANK0, 0);
 
   multicore_launch_core1(core1);  // Lance le core1 (pour traitement signalM2 et du moteur 2)
   multicore_fifo_pop_blocking();  // Attend la fin de setup du core1
 
+  bool beep = 0;
+  Motor motor1;
 
-  bool beep = 0; // Beep Beep (debug execution des procos)
-  motor1.step_target = -300000;   // Avancer de x pas
+  motor1.consigne = -PWM_WRAP_VALUE * 0.5;
+
+  gpio_init(PICO_DEFAULT_LED_PIN);
+  gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
 
   // ================== proco_0 loop ====================
-  while (1) {
-    routine(motor1, 0);
+  while(1)  {
+    
+    routine(signalM1, motor1, 0);
 
-    // printf("v:%ld ; a:%ld ; c:%ld ; sum: %ld ; +s:%ld\n", motor1.speed, (int32_t)motor1.abs_foot, (int32_t)motor1.step_target, motor1.pid.sum_error, (uint32_t)(motor1.pid.sum_error * motor1.pid.i));
-    // printf("v:%ld\n", motor1.speed);
-
-    gpio_put(PIN_DIR_M1, !motor1.dir);
-    pwm_set_gpio_level(PIN_PWM_M1, motor1.speed);
+    printf("s: %d ; sp:%d ; lr:%ld\n", motor1.direction, motor1.speed, signalM1.lastResult);
+    //printf("p: %d ; m:%d ; vm:%d\n", signalM1.buffer[signalM1.index], mean(signalM1.buffer), signalM1.lastResult);
+    //printf("vm: %ld, l:%ld, lr:%ld\n", mean(signalM1.buffer), signalM1.buffer[signalM1.index], signalM1.lastResult);
+    gpio_put(PIN_M1_DIR, motor1.direction);
+    pwm_set_gpio_level(PIN_M1_PWM, motor1.speed);
 
     // Permet de voir la fréquence d'exécution :
     beep = !beep;
     gpio_put(PIN_PROCO_0_FREQ, beep);
+    sleep_ms(1);
   }
 }
 
-void core1() {
+void core1()  {
+
+  set_sys_clock_khz(CLOCK_FREQ_KHZ, 0);   // Définition de le vitesse d'horloge du proco
+
+  // Initialisation du timer système
+  systick_hw->csr |= 0x00000005;    // Active le compteur de cycle avec l'horloge
+  systick_hw->rvr  = 0x00ffffff;    // Set la valeur max du compteur
+
   // Signal B
-  gpio_init(PIN_SM2_B);
-  gpio_set_dir(PIN_SM2_B, GPIO_IN);
+  gpio_init(PIN_M2_SB);
+  gpio_set_dir(PIN_M2_SB, GPIO_IN);
 
   // Signal Dir
-  gpio_init(PIN_DIR_M2);
-  gpio_set_dir(PIN_DIR_M2, GPIO_OUT);
+  gpio_init(PIN_M2_DIR);
+  gpio_set_dir(PIN_M2_DIR, GPIO_OUT);
 
   // Test exécution du code
   gpio_init(PIN_PROCO_1_FREQ);
   gpio_set_dir(PIN_PROCO_1_FREQ, GPIO_OUT);
 
   // PWM
-  gpio_set_function(PIN_PWM_M2, GPIO_FUNC_PWM);
-  uint pwm = pwm_gpio_to_slice_num(PIN_PWM_M2);
-  pwm_set_wrap(pwm, PWM_WRAP_VALUE); // Set max (théoriquement plus de précision, le max étant 65535)
+  gpio_set_function(PIN_M2_PWM, GPIO_FUNC_PWM);
+  uint pwm = pwm_gpio_to_slice_num(PIN_M2_PWM);
+  pwm_set_wrap(pwm, PWM_WRAP_VALUE); // Set max
   pwm_set_chan_level(pwm, PWM_CHAN_A, 0); // 0%
-  pwm_set_clkdiv(pwm, 100);
+  pwm_set_clkdiv(pwm, 1);
   pwm_set_enabled(pwm, 1);
-
-  // Initialise les interruptions sur la broche 0
-  gpio_set_irq_enabled_with_callback(PIN_SM2_A, GPIO_IRQ_EDGE_RISE, true, interruptSignal2);
+  
+  // Initialise les interruptions sur la pin du signal A
+  gpio_set_irq_enabled_with_callback(PIN_M2_SA, GPIO_IRQ_EDGE_RISE, true, interruptSignal2);
   irq_set_priority(IO_IRQ_BANK0, 0);
 
   // Fin de setup
   multicore_fifo_push_blocking(FLAG_CORE1);
 
   bool beep;
+  Motor motor2;
 
-  motor2.step_target = 2000;
-  motor2.dir = FORWARD;
+  motor2.consigne = PWM_WRAP_VALUE;
 
   // ============= proco_1 loop =============
-  while (true) {
-    routine(motor2, 1);
+  while(true) { 
+    
+    routine(signalM2, motor2, 1);
 
-    // printf("s:%d / m:%ld\n", motor2.speed, signalM2.lastResult);
-
-    gpio_put(PIN_DIR_M2, !motor2.dir);
-    pwm_set_gpio_level(PIN_PWM_M2, motor2.speed);
+    //printf("s: %d ; sp:%d ; m:%ld\n", motor2.direction, motor2.speed, (uint32_t)signalM2.absStep);
+    //printf("s: %d ; sp:%d ; lr:%ld\n", motor2.direction, motor2.speed, signalM2.lastResult);
+    // On met à jour le sens de rotation et la vitesse du moteur
+    gpio_put(PIN_M2_DIR, motor2.direction);
+    pwm_set_gpio_level(PIN_M2_PWM, motor2.speed);
 
     // Permet de voir la fréquence d'exécution :
     beep = !beep;
@@ -171,61 +245,118 @@ void core1() {
   }
 }
 
-void routine(Motor& motor_control, bool proco) {
-  motor_control.pid.error = motor_control.step_target;     // Nombre de pas restant
+void routine(SignalProcessing& signal, Motor& motorControl, bool proco) {
 
-  pid(motor_control.pid, motor_control.dir, motor_control.speed);
-  motor_control.speed = constrain(motor_control.speed, 0, PWM_WRAP_VALUE);
+    //Si le flag de dépassement du timer est à 1 on enregistre la retenue
+    if (systick_hw->csr & 0x00010000)     {
+      if (proco)  counter64_1++;
+      else        counter64_0++;
+    }
+
+    // Si on ne recoit pas de signal pendant plus de 6.7 ms on considère la vitesse du moteur à 0
+    int64_t test = getTime64(proco) - signal.top;
+    if (test > (int64_t)((TIME_OUT * 0.001) * CLOCK_FREQ_KHZ)) { // (µs->ms) * clk_kHz
+      signal.buffer[signal.index++] = 0;
+      if (signal.index >= BUFFER_SIZE) signal.index = 0;
+    }
+
+    signal.lastResult = mean(signal.buffer); // 15µs (66667Hz) à v=0xffff ; 6.667ms (150Hz) à v=0 (TIME_OUT)
+    if (signal.lastResult != 0) {
+      uint32_t motorFrequency = (CLOCK_FREQ_KHZ * 1000.0)/signal.lastResult;
+      motorFrequency = constrain(motorFrequency, 0, 66667);
+      signal.lastResult = map(motorFrequency, 0, 66667, 0, PWM_WRAP_VALUE);
+    }
+    
+    motorControl.pid.error = signal.lastResult - motorControl.consigne;
+    motorControl.speed = motorControl.consigne - PID(motorControl.pid); // Calcul de correction
+
+    //On tiens compte du sens de rotation moteur après la correction PID
+    if (motorControl.speed < 0) {
+      motorControl.speed *= -1;
+      motorControl.direction = BACKWARD;
+    }
+    else  {
+      motorControl.direction = FORWARD;
+    }
+
+    motorControl.speed = constrain(motorControl.speed, 0, PWM_WRAP_VALUE);
 }
 
 void interruptSignal1(uint gpio, uint32_t events) {
-  // On obtient le sens de la marche moteur en regardant le signal B
-  if (gpio_get(PIN_SM1_B)) {
-    motor1.abs_foot += 1;
-    motor1.step_target -= 1;
-  } else {
-    motor1.abs_foot -= 1;
-    motor1.step_target += 1;
+  // On regarde le sens de la marche moteur en regardant le signal B
+  signalM1.signalB = gpio_get(PIN_M1_SB);
+
+  // Si flag à 1 du compteur on fait une retenu
+  if (systick_hw->csr & 0x00010000)   counter64_0++;
+  
+  // Enregistre la période
+  signalM1.buffer[signalM1.index++] = getTime64(0) - signalM1.top;  
+  signalM1.top = getTime64(0);
+
+  // Ajoute un pas
+  if (signalM1.signalB)     signalM1.absStep += 1;
+  else                      signalM1.absStep -= 1;
+
+  if (signalM1.index >= BUFFER_SIZE)  {
+    signalM1.index = 0;
   }
 }
 
 void interruptSignal2(uint gpio, uint32_t events) {
-  // On obtient le sens de la marche moteur en regardant le signal B
-  if (gpio_get(PIN_SM2_B)) {
-    motor2.abs_foot += 1;
-    motor2.step_target -= 1;
-  } else {
-    motor2.abs_foot -= 1;
-    motor2.step_target += 1;
+  // On regarde le sens de la marche moteur en regardant le signal B
+  signalM2.signalB = gpio_get(PIN_M2_SB);
+
+  // Si flag à 1 du compteur on fait une retenu
+  if (systick_hw->csr & 0x00010000)   counter64_1++;
+  
+  // Enregistre la période
+  signalM2.buffer[signalM2.index++] = getTime64(1) - signalM2.top;  
+  signalM2.top = getTime64(1);
+
+  // Ajoute un pas
+  if (signalM2.signalB)     signalM2.absStep += 1;
+  else                      signalM2.absStep -= 1;
+
+  if (signalM2.index >= BUFFER_SIZE)  {
+    signalM2.index = 0;
   }
 }
 
-void pid(PidController& pid, bool& dir, uint16_t& speed) {
-  static int32_t correction = 0;
+int32_t PID(PidController& pid)  {
+  
+  int32_t correction = 0;
 
-  pid.delta_error = pid.error - pid.previous_error;
-  pid.sum_error += pid.error / 30;
+  pid.deltaError = pid.error - pid.previous_error;
+  pid.sumError  += pid.error;
 
   // On évite un trop gros dépassement. Ici, si l'erreur est la plus grande et avec un coeff i=1,
-  // le moteur aura la step_target maximum en un seul cycle d'exécution
-  pid.sum_error = constrain(pid.sum_error, -PWM_WRAP_VALUE, PWM_WRAP_VALUE);
-
-  correction = (int32_t)(pid.p * pid.error + pid.i * pid.sum_error + pid.d * pid.delta_error);
-  correction = constrain(correction, -PWM_WRAP_VALUE, PWM_WRAP_VALUE);
-
-  // Applique la vitesse et la direction des moteurs
-  if (correction >= 0) {
-    dir = FORWARD;
-    speed = correction;
-  } else {
-    dir = BACKWARD;
-    speed = correction * -1;
-  }
-
+  // le moteur aura la consigne maximum en un seul cycle d'exécution
+  pid.sumError = constrain(pid.sumError, - PWM_WRAP_VALUE * pid.ki, PWM_WRAP_VALUE * pid.ki);
+  
+  correction = (int32_t)(pid.kp * pid.error + pid.ki * pid.sumError + pid.kd * pid.deltaError);
   pid.previous_error = pid.error;
+ 
+  return correction;
 }
 
-long constrain(long x, long min, long max) {
+inline uint64_t getTime64(bool proco)  {
+  if      (proco == 0)    return (counter64_0<<24) + (0x00ffffff - systick_hw->cvr);
+  else if (proco == 1)    return (counter64_1<<24) + (0x00ffffff - systick_hw->cvr);
+}
+
+uint32_t mean(volatile uint32_t* tab) {
+  uint64_t average = 0;
+  for (int i = 0; i < BUFFER_SIZE; i++) average += tab[i];
+  average /= BUFFER_SIZE;
+
+  return (uint32_t)average;
+}
+
+uint16_t map(float x, float in_min, float in_max, float out_min, float out_max) {
+  return (uint16_t)((x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min);
+}
+
+int32_t constrain(uint32_t x, uint32_t min, uint32_t max) {
   if (x > max)      return max;
   else if (x < min) return min;
   return x;
