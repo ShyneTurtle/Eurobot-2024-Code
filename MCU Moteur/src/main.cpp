@@ -1,8 +1,7 @@
+#include <Arduino.h>
 #include <pico/stdlib.h>
-#include <stdio.h>
-#include <hardware/gpio.h>
 #include <pico/time.h>
-#include <pico/multicore.h>
+#include <hardware/gpio.h>
 #include <hardware/timer.h>
 #include <hardware/clocks.h>
 #include <hardware/pwm.h>
@@ -59,8 +58,6 @@ Motor motor2;
 
 // === FONCTIONS ===
 
-void core1(); // Programme exécuté sur le proco 1
-
 void interruptSignal1(uint gpio, uint32_t events);  // Routine d'interruption sur le signal A moteur 1
 
 void interruptSignal2(uint gpio, uint32_t events);  // Routine d'interruption sur le signal A moteur 2
@@ -69,12 +66,10 @@ void routine(Motor& motor_control, bool proco);  // Routine de loop identique au
 
 void pid(PidController& pid, bool& dir, uint16_t& speed);  // Correction PID
 
-long constrain(long x, long min, long max);
-
 // === MAIN PROCO 0 ===
-int main() {
+void setup() {
   // = INITIALISATION MATERIELLE =
-  stdio_init_all();
+  Serial.begin(115200);
   set_sys_clock_khz(CLOCK_FREQ_KHZ, 0);   // clk_sys à 100MHz
 
   // Signal B
@@ -101,30 +96,24 @@ int main() {
   gpio_set_irq_enabled_with_callback(PIN_SM1_A, GPIO_IRQ_EDGE_RISE, true, interruptSignal1);
   irq_set_priority(IO_IRQ_BANK0, 0);
 
-  multicore_launch_core1(core1);  // Lance le core1 (pour traitement signalM2 et du moteur 2)
-  multicore_fifo_pop_blocking();  // Attend la fin de setup du core1
-
-
-  bool beep = 0; // Beep Beep (debug execution des procos)
   motor1.step_target = -300000;   // Avancer de x pas
+}
+bool beep0 = 0; // Beep Beep (debug execution des procos)
+void loop() {
+  routine(motor1, 0);
 
-  // ================== proco_0 loop ====================
-  while (1) {
-    routine(motor1, 0);
+  // Serial.printf("v:%ld ; a:%ld ; c:%ld ; sum: %ld ; +s:%ld\n", motor1.speed, (int32_t)motor1.abs_foot, (int32_t)motor1.step_target, motor1.pid.sum_error, (uint32_t)(motor1.pid.sum_error * motor1.pid.i));
+  // Serial.printf("v:%ld\n", motor1.speed);
 
-    // printf("v:%ld ; a:%ld ; c:%ld ; sum: %ld ; +s:%ld\n", motor1.speed, (int32_t)motor1.abs_foot, (int32_t)motor1.step_target, motor1.pid.sum_error, (uint32_t)(motor1.pid.sum_error * motor1.pid.i));
-    // printf("v:%ld\n", motor1.speed);
+  gpio_put(PIN_DIR_M1, !motor1.dir);
+  pwm_set_gpio_level(PIN_PWM_M1, motor1.speed);
 
-    gpio_put(PIN_DIR_M1, !motor1.dir);
-    pwm_set_gpio_level(PIN_PWM_M1, motor1.speed);
-
-    // Permet de voir la fréquence d'exécution :
-    beep = !beep;
-    gpio_put(PIN_PROCO_0_FREQ, beep);
-  }
+  // Permet de voir la fréquence d'exécution :
+  beep0 = !beep0;
+  gpio_put(PIN_PROCO_0_FREQ, beep0);
 }
 
-void core1() {
+void setup1() {
   // Signal B
   gpio_init(PIN_SM2_B);
   gpio_set_dir(PIN_SM2_B, GPIO_IN);
@@ -152,24 +141,22 @@ void core1() {
   // Fin de setup
   multicore_fifo_push_blocking(FLAG_CORE1);
 
-  bool beep;
 
   motor2.step_target = 2000;
   motor2.dir = FORWARD;
+}
+bool beep1 = 0;
+void loop1() {
+  routine(motor2, 1);
 
-  // ============= proco_1 loop =============
-  while (true) {
-    routine(motor2, 1);
+  // Serial.printf("s:%d / m:%ld\n", motor2.speed, signalM2.lastResult);
 
-    // printf("s:%d / m:%ld\n", motor2.speed, signalM2.lastResult);
+  gpio_put(PIN_DIR_M2, !motor2.dir);
+  pwm_set_gpio_level(PIN_PWM_M2, motor2.speed);
 
-    gpio_put(PIN_DIR_M2, !motor2.dir);
-    pwm_set_gpio_level(PIN_PWM_M2, motor2.speed);
-
-    // Permet de voir la fréquence d'exécution :
-    beep = !beep;
-    gpio_put(PIN_PROCO_1_FREQ, beep);
-  }
+  // Permet de voir la fréquence d'exécution :
+  beep1 = !beep1;
+  gpio_put(PIN_PROCO_1_FREQ, beep1);
 }
 
 void routine(Motor& motor_control, bool proco) {
@@ -224,10 +211,4 @@ void pid(PidController& pid, bool& dir, uint16_t& speed) {
   }
 
   pid.previous_error = pid.error;
-}
-
-long constrain(long x, long min, long max) {
-  if (x > max)      return max;
-  else if (x < min) return min;
-  return x;
 }
