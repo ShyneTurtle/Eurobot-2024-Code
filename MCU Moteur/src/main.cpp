@@ -1,15 +1,13 @@
+#include <Arduino.h>
 #include <pico/stdlib.h>
-#include <stdio.h>
-#include <hardware/gpio.h>
 #include <pico/time.h>
-#include <pico/multicore.h>
-
+#include <hardware/gpio.h>
 #include <hardware/timer.h>
 #include <hardware/clocks.h>
 #include <hardware/pwm.h>
 #include <hardware/structs/systick.h>
 #include <hardware/exception.h>
-#include <hardware/i2c.h>
+#include <hardware/irq.h>
 
 
 // === DESCRIPTION ===
@@ -98,9 +96,7 @@ SignalProcessing signalM2;
 
 // === FONCTIONS ===
 
-void core1(); // Programme exécuté sur le proco 1
-
-void interruptSignal1(uint gpio, uint32_t events);  // Routine d'interruption du signal A, moteur 1
+void interruptSignal1(uint gpio, uint32_t events);  // Routine d'interruption sur le signal A moteur 1
 
 void interruptSignal2(uint gpio, uint32_t events);  // Routine d'interruption du signal A, moteur 2
 
@@ -108,24 +104,11 @@ void routine(SignalProcessing& signal, Motor& motorControl, bool proco);  // Rou
 
 int32_t PID(PidController& pid);  // Calcul de correction PID
 
-uint32_t mean(volatile uint32_t* tab);   // Calcul du filtre
-
-inline uint64_t getTime64(bool proco);   // Conversion du temps sur 64 bits (temps lié à la fréquence des procos)
-
-int32_t constrain(uint32_t x, uint32_t min, uint32_t max);
-
-uint16_t map(float x, float in_min, float in_max, float out_min, float out_max);
-
 // === MAIN PROCO 0 ===
-int main()  {
-
-  // === INITIALISATION MATERIELLE ===
-  stdio_init_all();
-  set_sys_clock_khz(CLOCK_FREQ_KHZ, 0);   // Définition de le vitesse d'horloge du proco
-
-  // Initialisation du timer système
-  systick_hw->csr |= 0x00000005;    // Active le compteur de cycle avec l'horloge
-  systick_hw->rvr  = 0x00ffffff;    // Set la valeur max du compteur
+void setup() {
+  // = INITIALISATION MATERIELLE =
+  Serial.begin(115200);
+  set_sys_clock_khz(CLOCK_FREQ_KHZ, 0);   // clk_sys à 100MHz
 
   // Signal B
   gpio_init(PIN_M1_SB);
@@ -159,43 +142,24 @@ int main()  {
   gpio_set_irq_enabled_with_callback(PIN_M1_SA, GPIO_IRQ_EDGE_RISE, true, interruptSignal1);
   irq_set_priority(IO_IRQ_BANK0, 0);
 
-  multicore_launch_core1(core1);  // Lance le core1 (pour traitement signalM2 et du moteur 2)
-  multicore_fifo_pop_blocking();  // Attend la fin de setup du core1
+  motor1.step_target = -300000;   // Avancer de x pas
+}
+bool beep0 = 0; // Beep Beep (debug execution des procos)
+void loop() {
+  routine(motor1, 0);
 
-  bool beep = 0;
-  Motor motor1;
+  // Serial.printf("v:%ld ; a:%ld ; c:%ld ; sum: %ld ; +s:%ld\n", motor1.speed, (int32_t)motor1.abs_foot, (int32_t)motor1.step_target, motor1.pid.sum_error, (uint32_t)(motor1.pid.sum_error * motor1.pid.i));
+  // Serial.printf("v:%ld\n", motor1.speed);
 
-  motor1.consigne = -PWM_WRAP_VALUE * 0.5;
+  gpio_put(PIN_DIR_M1, !motor1.dir);
+  pwm_set_gpio_level(PIN_PWM_M1, motor1.speed);
 
-  gpio_init(PICO_DEFAULT_LED_PIN);
-  gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-
-  // ================== proco_0 loop ====================
-  while(1)  {
-    
-    routine(signalM1, motor1, 0);
-
-    printf("s: %d ; sp:%d ; lr:%ld\n", motor1.direction, motor1.speed, signalM1.lastResult);
-    //printf("p: %d ; m:%d ; vm:%d\n", signalM1.buffer[signalM1.index], mean(signalM1.buffer), signalM1.lastResult);
-    //printf("vm: %ld, l:%ld, lr:%ld\n", mean(signalM1.buffer), signalM1.buffer[signalM1.index], signalM1.lastResult);
-    gpio_put(PIN_M1_DIR, motor1.direction);
-    pwm_set_gpio_level(PIN_M1_PWM, motor1.speed);
-
-    // Permet de voir la fréquence d'exécution :
-    beep = !beep;
-    gpio_put(PIN_PROCO_0_FREQ, beep);
-    sleep_ms(1);
-  }
+  // Permet de voir la fréquence d'exécution :
+  beep0 = !beep0;
+  gpio_put(PIN_PROCO_0_FREQ, beep0);
 }
 
-void core1()  {
-
-  set_sys_clock_khz(CLOCK_FREQ_KHZ, 0);   // Définition de le vitesse d'horloge du proco
-
-  // Initialisation du timer système
-  systick_hw->csr |= 0x00000005;    // Active le compteur de cycle avec l'horloge
-  systick_hw->rvr  = 0x00ffffff;    // Set la valeur max du compteur
-
+void setup1() {
   // Signal B
   gpio_init(PIN_M2_SB);
   gpio_set_dir(PIN_M2_SB, GPIO_IN);
@@ -223,26 +187,22 @@ void core1()  {
   // Fin de setup
   multicore_fifo_push_blocking(FLAG_CORE1);
 
-  bool beep;
-  Motor motor2;
 
-  motor2.consigne = PWM_WRAP_VALUE;
+  motor2.step_target = 2000;
+  motor2.dir = FORWARD;
+}
+bool beep1 = 0;
+void loop1() {
+  routine(motor2, 1);
 
-  // ============= proco_1 loop =============
-  while(true) { 
-    
-    routine(signalM2, motor2, 1);
+  // Serial.printf("s:%d / m:%ld\n", motor2.speed, signalM2.lastResult);
 
-    //printf("s: %d ; sp:%d ; m:%ld\n", motor2.direction, motor2.speed, (uint32_t)signalM2.absStep);
-    //printf("s: %d ; sp:%d ; lr:%ld\n", motor2.direction, motor2.speed, signalM2.lastResult);
-    // On met à jour le sens de rotation et la vitesse du moteur
-    gpio_put(PIN_M2_DIR, motor2.direction);
-    pwm_set_gpio_level(PIN_M2_PWM, motor2.speed);
+  gpio_put(PIN_DIR_M2, !motor2.dir);
+  pwm_set_gpio_level(PIN_PWM_M2, motor2.speed);
 
-    // Permet de voir la fréquence d'exécution :
-    beep = !beep;
-    gpio_put(PIN_PROCO_1_FREQ, beep);
-  }
+  // Permet de voir la fréquence d'exécution :
+  beep1 = !beep1;
+  gpio_put(PIN_PROCO_1_FREQ, beep1);
 }
 
 void routine(SignalProcessing& signal, Motor& motorControl, bool proco) {
@@ -335,29 +295,4 @@ int32_t PID(PidController& pid)  {
   
   correction = (int32_t)(pid.kp * pid.error + pid.ki * pid.sumError + pid.kd * pid.deltaError);
   pid.previous_error = pid.error;
- 
-  return correction;
-}
-
-inline uint64_t getTime64(bool proco)  {
-  if      (proco == 0)    return (counter64_0<<24) + (0x00ffffff - systick_hw->cvr);
-  else if (proco == 1)    return (counter64_1<<24) + (0x00ffffff - systick_hw->cvr);
-}
-
-uint32_t mean(volatile uint32_t* tab) {
-  uint64_t average = 0;
-  for (int i = 0; i < BUFFER_SIZE; i++) average += tab[i];
-  average /= BUFFER_SIZE;
-
-  return (uint32_t)average;
-}
-
-uint16_t map(float x, float in_min, float in_max, float out_min, float out_max) {
-  return (uint16_t)((x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min);
-}
-
-int32_t constrain(uint32_t x, uint32_t min, uint32_t max) {
-  if (x > max)      return max;
-  else if (x < min) return min;
-  return x;
 }
