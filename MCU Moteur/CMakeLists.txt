@@ -6,6 +6,8 @@ include(pico_sdk_import.cmake)
 
 project(control_moteur)
 
+add_compile_options(-Ofast)
+
 # initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
 
@@ -23,7 +25,8 @@ target_link_libraries(
 	pico_multicore
 	hardware_pwm
 	hardware_i2c
-	hardware_exception)
+	hardware_exception
+)
 
 # enable usb output, disable uart output
 pico_enable_stdio_usb(main 1)

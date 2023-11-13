@@ -17,18 +17,20 @@
 #define FORWARD     1     // Marche avant
 #define BACKWARD    0     // Marche arrière
 
+#define PULSE_MULT      2       // multiplicateur d'impulsion (à changer)
 #define CLOCK_FREQ_KHZ  100000  // Fréquence du rp2040 (kHz)
 #define PWM_WRAP_VALUE  255     // Précision du pwm (1 -> 0xffff), influe aussi sur la fréquence du pwm
-#define MAX_SPEED       4.5
+#define MAX_SPEED       4.5     // en tr/s (mesuré)
 #define LOOP_TIME       10      // Temps d'une loop en ms
-#define PULSE_PER_TOUR  15000.  // Nombre d'impulsion encodeur par tour de roue (10 * 500 * 3)
-#define WHEEL_PERIMETER 20      // Périmètre de la roue (en cm)
+#define PULSE_PER_TOUR  (14769 * PULSE_MULT)   // Nombre d'impulsions par tour de roue (mesuré)
+#define PULSE_PER_100CM (67161 * PULSE_MULT)   // Nombre d'impulsions mesuré sur 100cm avec une roue de 7cm de diamètre (mesuré)
+#define ROBOT_PERIMETRE 111.5   // Distance parcouru par une roue lorsque le robot fais un tour sur lui même, en cm (mesuré)
 
 // I2C :
 #define PIN_I2C_SDA         16
 #define PIN_I2C_SCL         17
 #define I2C_SLAVE_ADDRESS   0x17
-#define I2C_BAUDRATE        100000  // Vitesse de transmission I2C (Hz)
+#define I2C_BAUDRATE        100000  // Vitesse de transmission I2C (en Hz)
 
 // Moteur 1
 #define PIN_M1_SA         0     // Pin du signal A, moteur 1

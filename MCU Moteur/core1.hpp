@@ -3,13 +3,13 @@
 #include "picoIncludes.hpp"
 #include "signalProcessing.hpp"
 #include "communications.hpp"
-#include "coreRoutine.hpp"
+#include "motorControl.hpp"
 
 // Ces fonctions sont déclaré autre part
 void interruptSignal2(uint gpio, uint32_t events);
 
 Motor motor2;
-MotionControl M2motion(MAX_SPEED * 0.7, 1);
+MotionControl M2motion(MAX_SPEED, 1);
 extern SignalProcessing signalM2;
 
 void setup1();
@@ -28,12 +28,15 @@ void core1()    {
 void setup1()   {
 
     // === INITIALISATION MATERIELLE ===
-    set_sys_clock_khz(CLOCK_FREQ_KHZ, 0);   // Définition de le vitesse d'horloge du proco
 
     // Active le timer système à la fréquence du core 
     systick_hw->csr |= 0x00000005;
     // On configure la valeur max pour avoir un temps de LOOP_TIME ms
     systick_hw->rvr  = (uint32_t)(LOOP_TIME * CLOCK_FREQ_KHZ);
+
+    // Signal A
+    // gpio_init(PIN_M2_SA);
+    // gpio_set_dir(PIN_M2_SA, GPIO_IN);
 
     // Signal B
     gpio_init(PIN_M2_SB);
@@ -52,63 +55,61 @@ void setup1()   {
     uint pwm = pwm_gpio_to_slice_num(PIN_M2_PWM);
     pwm_set_wrap(pwm, PWM_WRAP_VALUE); // Set max
     pwm_set_chan_level(pwm, PWM_CHAN_A, 0); // 0%
-    pwm_set_clkdiv(pwm, 25);
+    pwm_set_clkdiv(pwm, 15);
     pwm_set_enabled(pwm, 1);
 
     // Initialise les interruptions sur la broche du signal A
-    gpio_set_irq_enabled_with_callback(PIN_M2_SA, GPIO_IRQ_EDGE_RISE, true, interruptSignal2);
+    gpio_set_irq_enabled_with_callback(PIN_M2_SA, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, interruptSignal2);
+    // gpio_set_irq_enabled_with_callback(PIN_M2_SB, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, interruptSignal2);
     irq_set_priority(IO_IRQ_BANK0, 0);
 
+    setPIDcoeff(motor2.pid_position_control, 0.001, 0.0005, 0);
+    setPIDcoeff(motor2.pid_speed_control, 1, 0.1, 0);
+
+    M2motion.setOrder(FORCE_STOP, 0, 0);
     // Fin de setup
     multicore_fifo_push_blocking(1234);
-
 }
 
 void loop1()    {
-    static bool beep = 0;
-    static int last_core_order = 0;
+    static uint8_t last_core_order = 0;
     static int32_t last_core_value = 0;
-
+ 
     // === Comptage des fronts via les interruptions ===
 
-    // Attend la fin du temps de loop
-    while (!(systick_hw->csr & 0x00010000));
+    // On vérifie que le timer ne soit pas déjà terminé (cela ne doit pas arriver)
+    if (systick_hw->csr & 0x00010000)   {
+        gpio_put(PIN_PROCO_1_FREQ, 1);
+        // Générer un message d'alerte ?
+    }
+    else    {
+        // Attend la fin du temps de loop
+        gpio_put(PIN_PROCO_1_FREQ, 0);  // Temps d'attente
+        while (!(systick_hw->csr & 0x00010000));
+        gpio_put(PIN_PROCO_1_FREQ, 1);  // Temps de travail
+    }    
 
     // === calculs des données ===
 
-    // Enregistre et remet à zéro le compteur de pas
-    signalM2.buff_index = !signalM2.buff_index;
-    // 500 impulsion par tours & rapport du réducteur 1/10 = 5000 impulsions par tours
-    signalM2.speed_rotation = (signalM2.buff_count[!signalM2.buff_index] / PULSE_PER_TOUR) * (1000. / LOOP_TIME);
-    signalM2.buff_count[!signalM2.buff_index] = 0;
+    signalM2.buff_count[!signalM2.buff_index] = 0;  // Reset de l'ancien buffer
+    signalM2.buff_index = !signalM2.buff_index;     // Changement de buffer
+    // nb de tour * temps
+    signalM2.speed_rotation = (signalM2.buff_count[!signalM2.buff_index] / (float)PULSE_PER_TOUR) * (1000. / LOOP_TIME);
+    // Ajout du nombre de pas sur l'absolu
+    signalM2.absStep += signalM2.buff_count[!signalM2.buff_index];
+    // Calcul de la vitesse
+    M2motion.computeSpeedFromAdvancement(signalM2, motor2);
 
+    // === ordre ===
 
     // Exécution des ordres du core 0 :
     if (listen(last_core_order, last_core_value)) {
-        switch(last_core_order) {
-        case MOVE:
-            M2motion.move(last_core_value, signalM2.absStep);
-            break;
-        case ROTATE:
-            M2motion.rotate(last_core_value, signalM2.absStep);
-            break;
-        case FORCE_STOP:
-            M2motion.forceStop();
-            break;
-        }
+        printf("send : o:%d, v:%ld", last_core_order, last_core_value);
+        M2motion.setOrder(last_core_order, last_core_value, signalM2.absStep);
     }
-
-    // Calcul de la vitesse
-    motor2.consigne = M2motion.getSpeedFromAdvancement(signalM2.absStep);
-    // Asservissement vitesse
-    routine(signalM2, motor2, 1);
 
     // === écriture de l'état des sorties ===  
 
     gpio_put(PIN_M2_DIR, motor2.direction);
     pwm_set_gpio_level(PIN_M2_PWM, motor2.pwm);
-
-    // Permet de voir la fréquence d'exécution :
-    beep = !beep;
-    gpio_put(PIN_PROCO_1_FREQ, beep);
 }

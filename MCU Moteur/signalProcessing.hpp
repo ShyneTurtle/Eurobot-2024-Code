@@ -16,31 +16,36 @@ SignalProcessing signalM1;
 SignalProcessing signalM2;
 
 void interruptSignal1(uint gpio, uint32_t events) {
-  // On regarde le sens de la marche moteur en regardant le signal B
-  signalM1.signalB = gpio_get(PIN_M1_SB);
-
-  // Ajoute un pas
-  if (signalM1.signalB) {
-    signalM1.buff_count[signalM1.buff_index] += 1;
-    signalM1.absStep += 1;
-  }
-  else  {
-    signalM1.buff_count[signalM1.buff_index] -= 1;
-    signalM1.absStep -= 1;
-  }
+    // On regarde le sens de la marche moteur en regardant le signal B
+    if (gpio == PIN_M1_SA)  {
+        if (events & GPIO_IRQ_EDGE_RISE)
+            signalM1.signalB = !gpio_get(PIN_M1_SB);    // front montant
+        else
+            signalM1.signalB =  gpio_get(PIN_M1_SB);    // front descendant
+    }
+    
+    // Ajoute un pas
+    if (signalM1.signalB) {
+        signalM1.buff_count[signalM1.buff_index] += 1;
+    }
+    else  {
+        signalM1.buff_count[signalM1.buff_index] -= 1;
+    }
 }
 
 void interruptSignal2(uint gpio, uint32_t events) {
-  // On regarde le sens de la marche moteur en regardant le signal B
-  signalM2.signalB = gpio_get(PIN_M2_SB);
-
-  // Ajoute un pas
-  if (signalM2.signalB) {
-    signalM2.buff_count[signalM2.buff_index] += 1;
-    signalM2.absStep += 1;
-  }
-  else  {
-    signalM2.buff_count[signalM2.buff_index] -= 1;
-    signalM2.absStep -= 1;
-  }
+    if (gpio == PIN_M2_SA)  {
+        if (events & GPIO_IRQ_EDGE_RISE)
+            signalM2.signalB = !gpio_get(PIN_M2_SB);    // front montant
+        else
+            signalM2.signalB =  gpio_get(PIN_M2_SB);    // front descendant
+    }
+    
+    // Ajoute un pas
+    if (signalM2.signalB) {
+        signalM2.buff_count[signalM2.buff_index] += 1;
+    }
+    else  {
+        signalM2.buff_count[signalM2.buff_index] -= 1;
+    }
 }
