@@ -1,29 +1,37 @@
 {
 	"folders": [
 		{
-			"path": "./Coccinelle"
+			"name": "MCU Mecha",
+			"path": "MCU Mecha"
 		},
 		{
-			"path": "./MCU Mecha"
+			"name": "Coccinelle",
+			"path": "Coccinelle"
 		},
 		{
-			"path": "./MCU Moteur"
+			"name": "MCU Moteur",
+			"path": "MCU Moteur"
 		},
 		{
-			"path": "./MCU RFID"
+			"name": "MCU RFID",
+			"path": "MCU RFID"
 		},
 		{
-			"path": "./MCU UWB (Recepteur)"
+			"name": "MCU UWB (Recepteur)",
+			"path": "MCU UWB (Recepteur)"
 		},
 		{
-			"path": "./MCU UWB (Source)"
+			"name": "MCU UWB (Source)",
+			"path": "MCU UWB (Source)"
 		},
 		{
-			"path": "./Raspberry"
+			"name": "Raspberry",
+			"path": "Raspberry"
 		},
 		{
+			"name": "Eurobot-2024-Code",
 			"path": "."
-		},
+		}
 	],
 	"settings": {}
 }
