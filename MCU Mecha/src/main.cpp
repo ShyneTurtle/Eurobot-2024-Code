@@ -16,21 +16,27 @@
  *
  * - RW/0x03
 */
-byte i2c_reg[256] = { 0 };
+byte i2c_reg[256] = { 0b111111, 0, 0b000000 };
 byte i2c_target = 0;
+
 void i2cReceive(int count) {
     bool reg_addr_byte = true;
     while (Wire.available()) {
-        if (reg_addr_byte)
+        if (reg_addr_byte) {
             i2c_target = Wire.read();
-        else
+            Serial.printf("I2C Addr set to: %d\n", i2c_target);
+        }
+        else {
             i2c_reg[i2c_target++] = Wire.read();
+            Serial.printf("I2C W @%d, Data: %d\n", i2c_target-1, i2c_reg[i2c_target-1]);
+        }
         reg_addr_byte = false;
     }
-    i2c_reg[i2c_target++] = Wire.read();
 }
+
 void i2cRequest() {
     Wire.write(i2c_reg[i2c_target++]);
+    Serial.printf("I2C R @%d, Data: %d\n", i2c_target-1, i2c_reg[i2c_target-1]);
 }
 
 // === Barrier ===
@@ -45,8 +51,10 @@ byte barrier_pins[6] = {
 byte* barrier_reg = i2c_reg + 1;
 
 // === Grabber ===
-#define GRABBER_ANGLE_OPENED 120
-#define GRABBER_ANGLE_CLOSED 200
+const int GRABBER_ANGLE_OPENED[] = {164,170,152,164,170,152};
+const int GRABBER_ANGLE_PLANT[] = {135,139,122,135,139,122};
+const int GRABBER_ANGLE_CUP[] = {150,155,140,150,155,140};
+
 byte servo_pins[6] = {
     33,
     26,
@@ -59,7 +67,7 @@ Servo servo_list[6];
 byte* grabber_reg = i2c_reg;
 
 // === Platform ===
-#define PLATFORM_SPEED 100
+#define PLATFORM_SPEED 255
 #define PLATFORM1_BOTTOM_PIN 32
 #define PLATFORM1_TOP_PIN 25
 #define PLATFORM1_MF_PIN 2
@@ -76,10 +84,13 @@ byte* grabber_reg = i2c_reg;
 #define PLATFORM2_TARGET_BIT 5
 byte* platform_reg = i2c_reg + 2;
 
+
 void setup() {
     Wire.begin(0x27);
     Wire.onReceive(i2cReceive);
     Wire.onRequest(i2cRequest);
+
+    Serial.begin(115200);
 
     for (byte bit = 0; bit < 6; bit++) {
         // Barriers
@@ -108,44 +119,52 @@ void loop() {
 
         // === Grabbers ===
         // Get the target angle based on wether the grabber should be opened or closed
-        int angle = (*grabber_reg) & (1 << bit) ? GRABBER_ANGLE_CLOSED : GRABBER_ANGLE_OPENED;
+        int angle = (*grabber_reg) & (1 << bit) ? GRABBER_ANGLE_PLANT[bit] : GRABBER_ANGLE_OPENED[bit];
         servo_list[bit].write(angle);
     }
 
     // === Platform1 elevation ===
     // Read limit switches
-    bool platform1_bottom = digitalRead(PLATFORM1_BOTTOM_PIN);
-    bool platform1_top = digitalRead(PLATFORM1_TOP_PIN);
+    bool platform1_bottom = !digitalRead(PLATFORM1_BOTTOM_PIN);
+    bool platform1_top = !digitalRead(PLATFORM1_TOP_PIN);
     // Read target from I2C reg
     bool platform1_target = (*platform_reg) & (1 << PLATFORM1_TARGET_BIT);
     // Make the motor move to the target position
-    digitalWrite(PLATFORM1_MR_PIN, !platform1_target);
+    // Set the H Bridge mode on the correct pin depending on the rotation direction
+    int platform1_mode_pin = platform1_target ? PLATFORM1_MR_PIN : PLATFORM1_MF_PIN;
+    digitalWrite(platform1_mode_pin, 0);
+    // Send a PWM to the H Bridge
+    int platform1_pwm_pin = platform1_target ? PLATFORM1_MF_PIN : PLATFORM1_MR_PIN;
     analogWrite(
-        PLATFORM1_MF_PIN,
-        (platform1_target ? platform1_top : platform1_bottom) * PLATFORM_SPEED
+        platform1_pwm_pin,
+        (platform1_target ? !platform1_top : !platform1_bottom) * PLATFORM_SPEED
     );
     // Save reads in the I2C register
     (*platform_reg) &= ~(1 << PLATFORM1_BOTTOM_BIT);
-    (*platform_reg) |= platform1_bottom << 0;
+    (*platform_reg) |= platform1_bottom << PLATFORM1_BOTTOM_BIT;
     (*platform_reg) &= ~(1 << PLATFORM1_TOP_BIT);
     (*platform_reg) |= platform1_top << PLATFORM1_TOP_BIT;
 
 
     // === Platform2 elevation ===
     // Read limit switches
-    bool platform2_bottom = digitalRead(PLATFORM2_BOTTOM_PIN);
-    bool platform2_top = digitalRead(PLATFORM2_TOP_PIN);
+    bool platform2_bottom = !digitalRead(PLATFORM2_BOTTOM_PIN);
+    bool platform2_top = !digitalRead(PLATFORM2_TOP_PIN);
     // Read target from I2C reg
     bool platform2_target = (*platform_reg) & (1 << PLATFORM2_TARGET_BIT);
     // Make the motor move to the target position
-    digitalWrite(PLATFORM2_MR_PIN, !platform2_target);
+    // Set the H Bridge mode on the correct pin depending on the rotation direction
+    int platform2_mode_pin = platform2_target ? PLATFORM2_MR_PIN : PLATFORM2_MF_PIN;
+    digitalWrite(platform2_mode_pin, 1);
+    // Send a PWM to the H Bridge
+    int platform2_pwm_pin = platform2_target ? PLATFORM2_MF_PIN : PLATFORM2_MR_PIN;
     analogWrite(
-        PLATFORM2_MF_PIN,
-        (platform2_target ? platform2_top : platform2_bottom) * PLATFORM_SPEED
+        platform2_pwm_pin,
+        (platform2_target ? !platform2_top : !platform2_bottom) * PLATFORM_SPEED
     );
     // Save reads in the I2C register
     (*platform_reg) &= ~(1 << PLATFORM2_BOTTOM_BIT);
-    (*platform_reg) |= platform2_bottom << 0;
+    (*platform_reg) |= platform2_bottom << PLATFORM2_BOTTOM_BIT;
     (*platform_reg) &= ~(1 << PLATFORM2_TOP_BIT);
     (*platform_reg) |= platform2_top << PLATFORM2_TOP_BIT;
 
