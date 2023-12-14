@@ -44,7 +44,7 @@ byte barrier_pins[6] = {
     13,
     14,
     15,
-    16,
+    36,
     39
 };
 byte* barrier_reg = i2c_reg + 1;
