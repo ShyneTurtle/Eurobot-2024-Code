@@ -24,19 +24,18 @@ void i2cReceive(int count) {
     while (Wire.available()) {
         if (reg_addr_byte) {
             i2c_target = Wire.read();
-            Serial.printf("I2C Addr set to: %d\n", i2c_target);
-        }
-        else {
+            // Serial.printf("I2C Addr set to: %d\n", i2c_target);
+        } else {
+            // Serial.printf("I2C W @%d, Data: %x\n", i2c_target, i2c_reg[i2c_target]);
             i2c_reg[i2c_target++] = Wire.read();
-            Serial.printf("I2C W @%d, Data: %d\n", i2c_target-1, i2c_reg[i2c_target-1]);
         }
         reg_addr_byte = false;
     }
 }
 
 void i2cRequest() {
-    Wire.write(i2c_reg[i2c_target++]);
-    Serial.printf("I2C R @%d, Data: %d\n", i2c_target-1, i2c_reg[i2c_target-1]);
+    // Serial.printf("I2C R @%d, Data: %x\n", i2c_target, i2c_reg[i2c_target]);
+    WRITE_PERI_REG(0x6001301c, i2c_reg[i2c_target++]);
 }
 
 // === Barrier ===
