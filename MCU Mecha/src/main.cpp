@@ -134,7 +134,7 @@ void loop() {
         // Set the barrier status in the register
         setBit(barrier_reg, bit, !digitalRead(barrier_pins[bit]));
         // Grabber trigger based on barrier
-        if (getBit(grabber_trigger_reg, bit)) {
+        if (getBit(grabber_trigger_reg, bit) && getBit(barrier_reg, bit)) {
             // Disable the auto trigger
             setBit(grabber_trigger_reg, bit, 0);
             // Close the grabber
@@ -143,9 +143,9 @@ void loop() {
 
         // === Grabbers ===
         // Get the target angle based on wether the grabber should be in cup of plant
-        int angle = getBit(grabber_angle_reg, bit) ? GRABBER_ANGLE_PLANT[bit] : GRABBER_ANGLE_OPENED[bit];
+        int angle = getBit(grabber_angle_reg, bit) ? GRABBER_ANGLE_CUP[bit] : GRABBER_ANGLE_PLANT[bit];
         // Get the target angle based on wether the grabber should be closed or opened
-        angle *= getBit(grabber_reg, bit);
+        angle = getBit(grabber_reg, bit) ? angle : GRABBER_ANGLE_OPENED[bit];
         servo_list[bit].write(angle);
     }
 
