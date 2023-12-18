@@ -5,18 +5,22 @@
 /**
  * ==== I2C MAP ====
  *
- * - RW/0x00 Grabber status (0 = open)
+ * - RW/0x00 Grabber status (0 = open, 1 = closed)
  * b0: Grabber1, b1: Grabber2, b2: Grabber3, b3: Grabber4, b4: Grabber5, b5: Grabber6
  *
- * - R/0x01 Infrared Barrier status (0 = nothing)
+ * - RW/0x01 Grabber angle (0 = plant, 1 = cup)
+ * b0: Grabber1, b1: Grabber2, b2: Grabber3, b3: Grabber4, b4: Grabber5, b5: Grabber6
+ *
+ * - RW/0x02 Grabber close trigger (0 = manual, 1 = automatic close uppon barrier detect)
+ * b0: Grabber1, b1: Grabber2, b2: Grabber3, b3: Grabber4, b4: Grabber5, b5: Grabber6
+ *
+ * - R/0x03 Infrared Barrier status (0 = nothing, 1 = detected)
  * b0: Barrier1, b1: Barrier2, b2: Barrier3, b3: Barrier4, b4: Barrier5, b5: Barrier6
  *
- * - RW/0x02 Platform status
+ * - RW/0x04 Platform status
  * b0: Bottom Switch1, b1: Top Switch1, b2: Platform target1 (1=top), b3: Bottom Switch2, b4: Top Switch 2, b5: Platform target2(1=top)
- *
- * - RW/0x03
 */
-byte i2c_reg[256] = { 0b111111, 0, 0b000000 };
+byte i2c_reg[256] = { 0, 0, 0, 0, 0 };
 byte i2c_target = 0;
 
 void i2cReceive(int count) {
@@ -47,12 +51,12 @@ byte barrier_pins[6] = {
     36,
     39
 };
-byte* barrier_reg = i2c_reg + 1;
+byte* barrier_reg = i2c_reg + 3;
 
 // === Grabber ===
-const int GRABBER_ANGLE_OPENED[] = {164,170,152,164,170,152};
-const int GRABBER_ANGLE_PLANT[] = {135,139,122,135,139,122};
-const int GRABBER_ANGLE_CUP[] = {150,155,140,150,155,140};
+const int GRABBER_ANGLE_OPENED[] = { 164,170,152,164,170,152 };
+const int GRABBER_ANGLE_PLANT[] = { 135,139,122,135,139,122 };
+const int GRABBER_ANGLE_CUP[] = { 150,155,140,150,155,140 };
 
 byte servo_pins[6] = {
     33,
@@ -64,6 +68,8 @@ byte servo_pins[6] = {
 };
 Servo servo_list[6];
 byte* grabber_reg = i2c_reg;
+byte* grabber_angle_reg = i2c_reg + 1;
+byte* grabber_trigger_reg = i2c_reg + 2;
 
 // === Platform ===
 #define PLATFORM_SPEED 255
@@ -125,12 +131,21 @@ void setup() {
 void loop() {
     for (byte bit = 0; bit < 6; bit++) {
         // === Barriers ===
-        // Set to 0 the current bit
+        // Set the barrier status in the register
         setBit(barrier_reg, bit, !digitalRead(barrier_pins[bit]));
+        // Grabber trigger based on barrier
+        if (getBit(grabber_trigger_reg, bit)) {
+            // Disable the auto trigger
+            setBit(grabber_trigger_reg, bit, 0);
+            // Close the grabber
+            setBit(grabber_reg, bit, 1);
+        }
 
         // === Grabbers ===
-        // Get the target angle based on wether the grabber should be opened or closed
-        int angle = (*grabber_reg) & (1 << bit) ? GRABBER_ANGLE_PLANT[bit] : GRABBER_ANGLE_OPENED[bit];
+        // Get the target angle based on wether the grabber should be in cup of plant
+        int angle = getBit(grabber_angle_reg, bit) ? GRABBER_ANGLE_PLANT[bit] : GRABBER_ANGLE_OPENED[bit];
+        // Get the target angle based on wether the grabber should be closed or opened
+        angle *= getBit(grabber_reg, bit);
         servo_list[bit].write(angle);
     }
 
@@ -147,7 +162,7 @@ void loop() {
     // Make the motor move to the target position
     // Set the H Bridge mode on the correct pin depending on the rotation direction
     int platform1_mode_pin = platform1_target ? PLATFORM1_MR_PIN : PLATFORM1_MF_PIN;
-    digitalWrite(platform1_mode_pin, 0);
+    digitalWrite(platform1_mode_pin, 1);
     // Send a PWM to the H Bridge on the correct pin depending on the rotation direction
     int platform1_pwm_pin = platform1_target ? PLATFORM1_MF_PIN : PLATFORM1_MR_PIN;
     analogWrite(
