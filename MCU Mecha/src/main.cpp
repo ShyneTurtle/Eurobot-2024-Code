@@ -162,7 +162,7 @@ void loop() {
     // Make the motor move to the target position
     // Set the H Bridge mode on the correct pin depending on the rotation direction
     int platform1_mode_pin = platform1_target ? PLATFORM1_MR_PIN : PLATFORM1_MF_PIN;
-    digitalWrite(platform1_mode_pin, 1);
+    digitalWrite(platform1_mode_pin, 0);
     // Send a PWM to the H Bridge on the correct pin depending on the rotation direction
     int platform1_pwm_pin = platform1_target ? PLATFORM1_MF_PIN : PLATFORM1_MR_PIN;
     analogWrite(
@@ -184,7 +184,7 @@ void loop() {
     // Make the motor move to the target position
     // Set the H Bridge mode on the correct pin depending on the rotation direction
     int platform2_mode_pin = platform2_target ? PLATFORM2_MR_PIN : PLATFORM2_MF_PIN;
-    digitalWrite(platform2_mode_pin, 1);
+    digitalWrite(platform2_mode_pin, 0);
     // Send a PWM to the H Bridge on the correct pin depending on the rotation direction
     int platform2_pwm_pin = platform2_target ? PLATFORM2_MF_PIN : PLATFORM2_MR_PIN;
     analogWrite(
