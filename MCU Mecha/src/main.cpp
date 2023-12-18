@@ -87,7 +87,7 @@ byte* grabber_trigger_reg = i2c_reg + 2;
 #define PLATFORM2_BOTTOM_BIT 3
 #define PLATFORM2_TOP_BIT 4
 #define PLATFORM2_TARGET_BIT 5
-byte* platform_reg = i2c_reg + 2;
+byte* platform_reg = i2c_reg + 4;
 
 
 bool getBit(uint8_t* reg, const uint8_t bitpos) {
@@ -192,5 +192,5 @@ void loop() {
         (platform2_target ? !platform2_top : !platform2_bottom) * PLATFORM_SPEED
     );
 
-    Serial.printf("Pinces: %x, Barrieres: %x, Platformes: %x\n", i2c_reg[0], i2c_reg[1], i2c_reg[2]);
+    Serial.printf("Pinces: %x, Barrieres: %x, Platformes: %x\n", i2c_reg[2], i2c_reg[3], i2c_reg[4]);
 }
