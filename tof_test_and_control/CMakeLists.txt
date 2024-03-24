@@ -1,0 +1,41 @@
+cmake_minimum_required(VERSION 3.13)
+
+# initialize the SDK based on PICO_SDK_PATH
+# note: this must happen before project()
+include(pico_sdk_import.cmake)
+
+project(tof_test_and_control)
+
+add_compile_options(-Ofast)
+
+# initialize the Raspberry Pi Pico SDK
+pico_sdk_init()
+
+#====================
+
+add_executable(main
+    main.cpp
+	  platforme.cpp
+	  vl53l5cx_api.cpp
+)
+
+# Add pico_stdlib library which aggregates commonly used features
+target_link_libraries(
+	main
+	pico_stdlib
+	pico_i2c_slave
+	pico_multicore
+	pico_binary_info
+	hardware_pwm
+	hardware_i2c
+	hardware_pio
+	hardware_clocks
+	hardware_exception
+)
+
+# enable usb output, disable uart output
+pico_enable_stdio_usb(main 1)
+pico_enable_stdio_uart(main 0)
+
+# create map/bin/hex/uf2 file in addition to ELF.
+pico_add_extra_outputs(main)
