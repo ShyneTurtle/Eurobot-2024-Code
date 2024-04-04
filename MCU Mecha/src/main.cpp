@@ -2,6 +2,12 @@
 #include "Wire.h"
 #include "ESP32Servo.h"
 
+#define I2C_DEV_ADDR 0x27
+
+uint16_t x_point = 0;
+uint16_t y_point = 0;
+
+
 /**
  * ==== I2C MAP ====
  *
@@ -19,6 +25,10 @@
  *
  * - RW/0x04 Platform status
  * b0: Bottom Switch1, b1: Top Switch1, b2: Platform target1 (1=top), b3: Bottom Switch2, b4: Top Switch 2, b5: Platform target2(1=top)
+ * 
+ * - R/0x05 point X GPS Site
+ * 
+ * - R/0x06 point Y GPS Site
 */
 byte i2c_reg[256] = { 0, 0, 0, 0, 0 };
 byte i2c_target = 0;
@@ -40,6 +50,7 @@ void i2cReceive(int count) {
 void i2cRequest() {
     // Serial.printf("I2C R @%d, Data: %x\n", i2c_target, i2c_reg[i2c_target]);
     WRITE_PERI_REG(0x6001301c, i2c_reg[i2c_target++]);
+    // Wire.print(i2c_reg[i2c_target++]);
 }
 
 // === Barrier ===
@@ -105,7 +116,7 @@ void setBit(uint8_t* reg, const uint8_t bitpos, const bool val) {
 }
 
 void setup() {
-    Wire.begin(0x27);
+    Wire.begin((uint8_t)I2C_DEV_ADDR);
     Wire.onReceive(i2cReceive);
     Wire.onRequest(i2cRequest);
 
@@ -169,6 +180,7 @@ void loop() {
         platform1_pwm_pin,
         (platform1_target ? !platform1_top : !platform1_bottom) * PLATFORM_SPEED
     );
+    Serial.printf("p1 bot=%d, p1 top=%d, p1 target=%d ", platform1_bottom, platform1_top, platform1_target);
 
 
     // === Platform2 elevation ===
