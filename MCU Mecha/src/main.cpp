@@ -199,8 +199,23 @@ void loop() {
 
     // === Platform2 elevation ===
     // Read limit switches
-    bool platform2_bottom = !digitalRead(PLATFORM2_BOTTOM_PIN);
-    bool platform2_top = !digitalRead(PLATFORM2_TOP_PIN);
+
+    uint8_t platform2_bottom = !digitalRead(PLATFORM2_BOTTOM_PIN);
+    for(int i=0; i<5 ; i++ ){
+        platform2_bottom += !digitalRead(PLATFORM2_BOTTOM_PIN);
+        delay(5);
+    }
+    platform1_bottom = platform1_bottom >= 3 ? true : false;
+
+    uint8_t platform2_top = !digitalRead(PLATFORM2_TOP_PIN);
+    for(int i=0; i<5 ; i++ ){
+        platform2_top += !digitalRead(PLATFORM2_TOP_PIN);
+        delay(5);
+    }
+    platform2_top = platform2_top >= 3 ? true : false;
+
+    // bool platform2_bottom = !digitalRead(PLATFORM2_BOTTOM_PIN);
+    // bool platform2_top = !digitalRead(PLATFORM2_TOP_PIN);
     // Save limit switches values in the I2C register
     setBit(platform_reg, PLATFORM2_BOTTOM_BIT, platform2_bottom);
     setBit(platform_reg, PLATFORM2_TOP_BIT, platform2_top);
